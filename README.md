@@ -4,7 +4,7 @@
 
 ## 🌐 Live Demo
 
-🔗 [View Deployed App](https://whisper-am8z.onrender.com/login)  
+🔗 [View Deployed App](https://whisper-73xo.onrender.com)
 
 ---
 
@@ -14,11 +14,11 @@
 
 ### 💬 Chat Interface
 
-![Chat Interface](screenshots/chat.png)
+![Chat Interface](chatPreview.jpg)
 
 ### 🎨 Theme Picker
 
-![Theme Picker](screenshots/theme-picker.png)
+![Theme Picker](themePage.jpg)
 
 ## ✨ Features
 
