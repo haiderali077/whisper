@@ -9,13 +9,17 @@ _()_
 
 ---
 
-## 📸 Screenshots
+### 🔐 Login Page
 
-<p float="left">
-  <img src="screenshots/login.png" alt="Login Page" width="300" />
-  <img src="screenshots/chat.png" alt="Chat Interface" width="300" />
-  <img src="screenshots/theme-picker.png" alt="Theme Picker" width="300" />
-</p>
+![Login Page](loginpage.jpg)
+
+### 💬 Chat Interface
+
+![Chat Interface](screenshots/chat.png)
+
+### 🎨 Theme Picker
+
+![Theme Picker](screenshots/theme-picker.png)
 
 ## ✨ Features
 
