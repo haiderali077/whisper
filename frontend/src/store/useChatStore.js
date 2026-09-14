@@ -9,6 +9,7 @@ import {
 } from "../lib/messageOutbox";
 
 const MAX_SEND_ATTEMPTS = 3;
+const RECEIPT_BATCH_SIZE = 100;
 
 const wait = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -33,6 +34,31 @@ const upsertMessage = (messages, incomingMessage) => {
   const updatedMessages = [...messages];
   updatedMessages[existingMessageIndex] = incomingMessage;
   return updatedMessages;
+};
+
+const applyMessageReceipts = (messages, receipts) => {
+  const receiptsByMessageId = new Map(
+    receipts.map((receipt) => [receipt.messageId, receipt])
+  );
+
+  return messages.map((message) => {
+    const receipt = receiptsByMessageId.get(message._id);
+    if (!receipt) return message;
+
+    return {
+      ...message,
+      deliveredAt: receipt.deliveredAt,
+      readAt: receipt.readAt,
+    };
+  });
+};
+
+const emitReceiptBatches = (socket, eventName, messageIds) => {
+  for (let index = 0; index < messageIds.length; index += RECEIPT_BATCH_SIZE) {
+    socket.emit(eventName, {
+      messageIds: messageIds.slice(index, index + RECEIPT_BATCH_SIZE),
+    });
+  }
 };
 
 export const useChatStore = create((set, get) => ({
@@ -117,6 +143,15 @@ export const useChatStore = create((set, get) => ({
         ? { messages, isMessagesLoading: false }
         : { isMessagesLoading: false }
     );
+
+    const deliveredMessageIds = serverMessages
+      .filter(
+        (message) =>
+          message.receiverId === authUser?._id && !message.deliveredAt
+      )
+      .map((message) => message._id);
+
+    get().markMessagesDelivered(deliveredMessageIds);
   },
 
   sendMessage: async (messageData, receiverIdOverride) => {
@@ -275,21 +310,54 @@ export const useChatStore = create((set, get) => ({
     }
   },
   subscribeToMessages: () => {
-    const { selectedUser } = get();
-    if (!selectedUser) return;
-
     const socket = useAuthStore.getState().socket;
+    if (!socket) return;
+
+    socket.off("newMessage");
+    socket.off("messageStatusUpdated");
+
     socket.on("newMessage", (newMessage) => {
+      get().markMessagesDelivered([newMessage._id]);
+
+      const { selectedUser } = get();
       const isMessageFromSelectedUser =
-        newMessage.senderId === selectedUser._id;
+        newMessage.senderId === selectedUser?._id;
       if (!isMessageFromSelectedUser) return;
-      set({ messages: [...get().messages, newMessage] });
+
+      set((state) => ({
+        messages: upsertMessage(state.messages, newMessage),
+      }));
+    });
+
+    socket.on("messageStatusUpdated", ({ receipts = [] }) => {
+      set((state) => ({
+        messages: applyMessageReceipts(state.messages, receipts),
+      }));
     });
   },
 
   unsubscribeFromMessages: () => {
     const socket = useAuthStore.getState().socket;
-    socket.off("newMessage");
+    socket?.off("newMessage");
+    socket?.off("messageStatusUpdated");
+  },
+
+  markMessagesDelivered: (messageIds) => {
+    if (messageIds.length === 0) return;
+
+    const socket = useAuthStore.getState().socket;
+    if (!socket?.connected) return;
+
+    emitReceiptBatches(socket, "messagesDelivered", messageIds);
+  },
+
+  markMessagesRead: (messageIds) => {
+    if (messageIds.length === 0) return;
+
+    const socket = useAuthStore.getState().socket;
+    if (!socket?.connected) return;
+
+    emitReceiptBatches(socket, "messagesRead", messageIds);
   },
 
   setSelectedUser: (selectedUser) => set({ selectedUser }),

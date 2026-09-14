@@ -17,7 +17,8 @@ import { Toaster } from "react-hot-toast";
 const App = () => {
   const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket } =
     useAuthStore();
-  const { syncOutbox } = useChatStore();
+  const { syncOutbox, subscribeToMessages, unsubscribeFromMessages } =
+    useChatStore();
   const { theme } = useThemeStore();
 
   useEffect(() => {
@@ -31,6 +32,11 @@ const App = () => {
       }
 
       await syncOutbox();
+
+      const { selectedUser, getMessages } = useChatStore.getState();
+      if (selectedUser) {
+        await getMessages(selectedUser._id);
+      }
     };
 
     window.addEventListener("online", handleReconnect);
@@ -45,6 +51,18 @@ const App = () => {
       socket?.off("connect", handleReconnect);
     };
   }, [authUser, checkAuth, socket, syncOutbox]);
+
+  useEffect(() => {
+    if (!authUser || !socket) return;
+
+    subscribeToMessages();
+    return () => unsubscribeFromMessages();
+  }, [
+    authUser,
+    socket,
+    subscribeToMessages,
+    unsubscribeFromMessages,
+  ]);
 
   console.log({ authUser });
   console.log("users online are", onlineUsers);

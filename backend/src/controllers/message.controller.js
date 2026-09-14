@@ -1,7 +1,7 @@
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 import cloudinary from "../lib/cloudinary.js";
-import { getReceiverSockerId, io } from "../lib/socket.js";
+import { getUserRoom, io } from "../lib/socket.js";
 
 export const getUsersForSideBar = async (req, res) => {
   try {
@@ -143,10 +143,7 @@ export const sendMessage = async (req, res) => {
       return res.status(200).json(existingMessage);
     }
 
-    const receiverSocketId = getReceiverSockerId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("newMessage", newMessage);
-    }
+    io.to(getUserRoom(receiverId)).emit("newMessage", newMessage);
 
     res.status(201).json(newMessage);
   } catch (error) {

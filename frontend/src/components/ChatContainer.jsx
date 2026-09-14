@@ -9,6 +9,7 @@ import { useAuthStore } from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
 import {
   Check,
+  CheckCheck,
   CircleAlert,
   Clock3,
   RotateCcw,
@@ -22,29 +23,47 @@ const ChatContainer = () => {
     isMessagesLoading,
     selectedUser,
     sendMessage,
-    subscribeToMessages,
-    unsubscribeFromMessages,
+    markMessagesRead,
   } = useChatStore();
   const { authUser } = useAuthStore();
   const messageEndRef = useRef(null);
 
   useEffect(() => {
     getMessages(selectedUser._id);
-    subscribeToMessages();
-
-    return () => unsubscribeFromMessages();
-  }, [
-    selectedUser._id,
-    getMessages,
-    subscribeToMessages,
-    unsubscribeFromMessages,
-  ]);
+  }, [selectedUser._id, getMessages]);
 
   useEffect(() => {
     if (messageEndRef.current && messages) {
       messageEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages]);
+
+  useEffect(() => {
+    const markVisibleMessagesRead = () => {
+      if (document.visibilityState !== "visible") return;
+
+      const unreadMessageIds = messages
+        .filter(
+          (message) =>
+            message.senderId === selectedUser._id &&
+            message.receiverId === authUser._id &&
+            !message.readAt
+        )
+        .map((message) => message._id);
+
+      markMessagesRead(unreadMessageIds);
+    };
+
+    markVisibleMessagesRead();
+    document.addEventListener("visibilitychange", markVisibleMessagesRead);
+
+    return () => {
+      document.removeEventListener(
+        "visibilitychange",
+        markVisibleMessagesRead
+      );
+    };
+  }, [authUser._id, markMessagesRead, messages, selectedUser._id]);
 
   const retryMessage = (message) => {
     void sendMessage({
@@ -137,7 +156,23 @@ const ChatContainer = () => {
                   </button>
                 )}
 
-                {(!message.status || message.status === "sent") && (
+                {message.readAt && (
+                  <span className="flex items-center gap-1 text-primary">
+                    <CheckCheck className="size-3" />
+                    Read
+                  </span>
+                )}
+
+                {!message.readAt && message.deliveredAt && (
+                  <span className="flex items-center gap-1">
+                    <CheckCheck className="size-3" />
+                    Delivered
+                  </span>
+                )}
+
+                {!message.readAt &&
+                  !message.deliveredAt &&
+                  (!message.status || message.status === "sent") && (
                   <span className="flex items-center gap-1">
                     <Check className="size-3" />
                     Sent
