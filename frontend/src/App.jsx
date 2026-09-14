@@ -8,18 +8,43 @@ import ProfilePage from "./pages/ProfilePage";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useAuthStore } from "./store/useAuthStore";
+import { useChatStore } from "./store/useChatStore";
 import { useThemeStore } from "./store/useThemeStore";
 
 import { Loader } from "lucide-react";
 import { Toaster } from "react-hot-toast";
 
 const App = () => {
-  const { authUser, checkAuth, isCheckingAuth, onlineUsers } = useAuthStore();
+  const { authUser, checkAuth, isCheckingAuth, onlineUsers, socket } =
+    useAuthStore();
+  const { syncOutbox } = useChatStore();
   const { theme } = useThemeStore();
 
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  useEffect(() => {
+    const handleReconnect = async () => {
+      if (!useAuthStore.getState().authUser) {
+        await checkAuth();
+      }
+
+      await syncOutbox();
+    };
+
+    window.addEventListener("online", handleReconnect);
+    socket?.on("connect", handleReconnect);
+
+    if (authUser && navigator.onLine) {
+      void syncOutbox();
+    }
+
+    return () => {
+      window.removeEventListener("online", handleReconnect);
+      socket?.off("connect", handleReconnect);
+    };
+  }, [authUser, checkAuth, socket, syncOutbox]);
 
   console.log({ authUser });
   console.log("users online are", onlineUsers);

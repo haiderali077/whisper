@@ -7,7 +7,13 @@ import MessageSkeleton from "./skeletons/MessageSkeleton";
 import { useAuthStore } from "../store/useAuthStore";
 
 import { formatMessageTime } from "../lib/utils";
-import { Check, CircleAlert, Clock3, RotateCcw } from "lucide-react";
+import {
+  Check,
+  CircleAlert,
+  Clock3,
+  RotateCcw,
+  WifiOff,
+} from "lucide-react";
 
 const ChatContainer = () => {
   const {
@@ -45,6 +51,7 @@ const ChatContainer = () => {
       clientMessageId: message.clientMessageId,
       text: message.text || "",
       image: message.image || null,
+      createdAt: message.createdAt,
     }).catch(() => {});
   };
 
@@ -107,6 +114,13 @@ const ChatContainer = () => {
                   <span className="flex items-center gap-1">
                     <Clock3 className="size-3" />
                     Sending...
+                  </span>
+                )}
+
+                {message.status === "queued" && (
+                  <span className="flex items-center gap-1">
+                    <WifiOff className="size-3" />
+                    Waiting for connection
                   </span>
                 )}
 
