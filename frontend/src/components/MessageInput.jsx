@@ -23,7 +23,7 @@ function MessageInput() {
     reader.readAsDataURL(file);
   };
 
-  const removeImage = (e) => {
+  const removeImage = () => {
     setImagePreview(null);
     if (fileInputeRef.current) {
       fileInputeRef.current.value = "";
@@ -34,15 +34,18 @@ function MessageInput() {
     e.preventDefault();
     if (!text.trim() && !imagePreview) return;
 
-    try {
-      await sendMessage({
-        text: text.trim(),
-        image: imagePreview,
-      });
+    const messageData = {
+      clientMessageId: crypto.randomUUID(),
+      text: text.trim(),
+      image: imagePreview,
+    };
 
-      setText("");
-      setImagePreview(null);
-      if (fileInputeRef.current) fileInputeRef.current.value = "null";
+    setText("");
+    setImagePreview(null);
+    if (fileInputeRef.current) fileInputeRef.current.value = "";
+
+    try {
+      await sendMessage(messageData);
     } catch (error) {
       console.error("Failed to send message:", error);
     }

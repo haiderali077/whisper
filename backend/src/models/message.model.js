@@ -2,6 +2,10 @@ import mongoose from "mongoose";
 
 const messageSchema = new mongoose.Schema(
   {
+    clientMessageId: {
+      type: String,
+      required: true,
+    },
     senderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -20,6 +24,11 @@ const messageSchema = new mongoose.Schema(
     },
   },
   { timestamps: true }
+);
+
+messageSchema.index(
+  { senderId: 1, clientMessageId: 1 },
+  { unique: true }
 );
 
 const Message = mongoose.model("Message", messageSchema);

@@ -82,9 +82,33 @@ export const getMessages = async (req, res) => {
 
 export const sendMessage = async (req, res) => {
   try {
-    const { text, image } = req.body;
+    const { text, image, clientMessageId } = req.body;
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
+
+    if (typeof clientMessageId !== "string" || !clientMessageId.trim()) {
+      return res.status(400).json({
+        message: "clientMessageId is required",
+      });
+    }
+
+    const hasText = typeof text === "string" && text.trim().length > 0;
+    const hasImage = typeof image === "string" && image.length > 0;
+
+    if (!hasText && !hasImage) {
+      return res.status(400).json({
+        message: "A message must contain text or an image",
+      });
+    }
+
+    const existingMessage = await Message.findOne({
+      clientMessageId,
+      senderId,
+    });
+
+    if (existingMessage) {
+      return res.status(200).json(existingMessage);
+    }
 
     let imageUrl;
     if (image) {
@@ -93,13 +117,31 @@ export const sendMessage = async (req, res) => {
     }
 
     const newMessage = new Message({
+      clientMessageId,
       senderId,
       receiverId,
       text,
       image: imageUrl,
     });
 
-    await newMessage.save();
+    try {
+      await newMessage.save();
+    } catch (error) {
+      if (error.code !== 11000) {
+        throw error;
+      }
+
+      const existingMessage = await Message.findOne({
+        senderId,
+        clientMessageId,
+      });
+
+      if (!existingMessage) {
+        throw error;
+      }
+
+      return res.status(200).json(existingMessage);
+    }
 
     const receiverSocketId = getReceiverSockerId(receiverId);
     if (receiverSocketId) {
