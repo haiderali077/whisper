@@ -12,6 +12,7 @@ import {
   CheckCheck,
   CircleAlert,
   Clock3,
+  Loader2,
   RotateCcw,
   WifiOff,
 } from "lucide-react";
@@ -24,19 +25,38 @@ const ChatContainer = () => {
     selectedUser,
     sendMessage,
     markMessagesRead,
+    loadOlderMessages,
+    hasMoreMessages,
+    isOlderMessagesLoading,
   } = useChatStore();
   const { authUser } = useAuthStore();
   const messageEndRef = useRef(null);
+  const previousLastMessageIdRef = useRef(null);
+  const previousConversationIdRef = useRef(null);
+  const isLoadingOlderRef = useRef(false);
 
   useEffect(() => {
     getMessages(selectedUser._id);
   }, [selectedUser._id, getMessages]);
 
   useEffect(() => {
-    if (messageEndRef.current && messages) {
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageId = lastMessage?.clientMessageId || lastMessage?._id;
+    const conversationChanged =
+      previousConversationIdRef.current !== selectedUser._id;
+    const receivedNewLastMessage =
+      lastMessageId && lastMessageId !== previousLastMessageIdRef.current;
+
+    if (
+      messageEndRef.current &&
+      (conversationChanged || receivedNewLastMessage)
+    ) {
       messageEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages]);
+
+    previousConversationIdRef.current = selectedUser._id;
+    previousLastMessageIdRef.current = lastMessageId;
+  }, [messages, selectedUser._id]);
 
   useEffect(() => {
     const markVisibleMessagesRead = () => {
@@ -74,6 +94,34 @@ const ChatContainer = () => {
     }).catch(() => {});
   };
 
+  const handleMessagesScroll = async (event) => {
+    const container = event.currentTarget;
+
+    if (
+      container.scrollTop > 80 ||
+      !hasMoreMessages ||
+      isOlderMessagesLoading ||
+      isLoadingOlderRef.current
+    ) {
+      return;
+    }
+
+    isLoadingOlderRef.current = true;
+    const previousScrollHeight = container.scrollHeight;
+    const previousScrollTop = container.scrollTop;
+
+    try {
+      await loadOlderMessages();
+
+      requestAnimationFrame(() => {
+        container.scrollTop =
+          container.scrollHeight - previousScrollHeight + previousScrollTop;
+      });
+    } finally {
+      isLoadingOlderRef.current = false;
+    }
+  };
+
   if (isMessagesLoading) {
     return (
       <div className="flex-1 flex flex-col overflow-auto">
@@ -88,14 +136,32 @@ const ChatContainer = () => {
     <div className="flex-1 flex flex-col overflow-auto">
       <ChatHeader />
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div
+        className="flex-1 overflow-y-auto p-4 space-y-4"
+        onScroll={handleMessagesScroll}
+      >
+        {isOlderMessagesLoading && (
+          <div
+            className="flex items-center justify-center gap-2 py-2 text-xs opacity-60"
+            role="status"
+          >
+            <Loader2 className="size-4 animate-spin" />
+            Loading older messages...
+          </div>
+        )}
+
+        {!hasMoreMessages && messages.length > 0 && (
+          <p className="py-2 text-center text-xs opacity-50">
+            Beginning of conversation
+          </p>
+        )}
+
         {messages.map((message) => (
           <div
             key={message.clientMessageId || message._id}
             className={`chat ${
               message.senderId === authUser._id ? "chat-end" : "chat-start"
             }`}
-            ref={messageEndRef}
           >
             <div className=" chat-image avatar">
               <div className="size-10 rounded-full border">
@@ -182,6 +248,7 @@ const ChatContainer = () => {
             )}
           </div>
         ))}
+        <div ref={messageEndRef} />
       </div>
 
       <MessageInput />

@@ -10,6 +10,7 @@ import {
 
 const MAX_SEND_ATTEMPTS = 3;
 const RECEIPT_BATCH_SIZE = 100;
+const MESSAGE_PAGE_SIZE = 30;
 
 const wait = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -35,6 +36,23 @@ const upsertMessage = (messages, incomingMessage) => {
   updatedMessages[existingMessageIndex] = incomingMessage;
   return updatedMessages;
 };
+
+const sortMessagesByTime = (messages) =>
+  [...messages].sort((firstMessage, secondMessage) => {
+    const timeDifference =
+      new Date(firstMessage.createdAt) - new Date(secondMessage.createdAt);
+
+    if (timeDifference !== 0) return timeDifference;
+    return String(firstMessage._id).localeCompare(String(secondMessage._id));
+  });
+
+const mergeMessages = (currentMessages, incomingMessages) =>
+  sortMessagesByTime(
+    incomingMessages.reduce(
+      (messages, message) => upsertMessage(messages, message),
+      currentMessages
+    )
+  );
 
 const applyMessageReceipts = (messages, receipts) => {
   const receiptsByMessageId = new Map(
@@ -67,6 +85,9 @@ export const useChatStore = create((set, get) => ({
   selectedUser: null,
   isUserLoading: false,
   isMessagesLoading: false,
+  isOlderMessagesLoading: false,
+  nextMessagesCursor: null,
+  hasMoreMessages: false,
 
   getUserS: async () => {
     set({ isUserLoading: true });
@@ -81,14 +102,25 @@ export const useChatStore = create((set, get) => ({
   },
 
   getMessages: async (userId) => {
-    set({ isMessagesLoading: true });
+    set({
+      isMessagesLoading: true,
+      isOlderMessagesLoading: false,
+      nextMessagesCursor: null,
+      hasMoreMessages: false,
+    });
     const { authUser } = useAuthStore.getState();
     let serverMessages = [];
     let outboxMessages = [];
+    let nextMessagesCursor = null;
+    let hasMoreMessages = false;
 
     try {
-      const res = await axiosInstance.get(`/messages/${userId}`);
-      serverMessages = res.data;
+      const res = await axiosInstance.get(`/messages/${userId}`, {
+        params: { limit: MESSAGE_PAGE_SIZE },
+      });
+      serverMessages = res.data.messages;
+      nextMessagesCursor = res.data.nextCursor;
+      hasMoreMessages = res.data.hasMore;
     } catch (error) {
       if (error.response) {
         toast.error(error.response.data.message || "Failed to load messages");
@@ -126,21 +158,23 @@ export const useChatStore = create((set, get) => ({
       }
     }
 
-    const messages = [
+    const messages = sortMessagesByTime([
       ...serverMessages.map((message) =>
         message.senderId === authUser?._id
           ? { ...message, status: "sent" }
           : message
       ),
       ...outboxMessages,
-    ].sort(
-      (firstMessage, secondMessage) =>
-        new Date(firstMessage.createdAt) - new Date(secondMessage.createdAt)
-    );
+    ]);
 
     set((state) =>
       state.selectedUser?._id === userId
-        ? { messages, isMessagesLoading: false }
+        ? {
+            messages,
+            isMessagesLoading: false,
+            nextMessagesCursor,
+            hasMoreMessages,
+          }
         : { isMessagesLoading: false }
     );
 
@@ -152,6 +186,72 @@ export const useChatStore = create((set, get) => ({
       .map((message) => message._id);
 
     get().markMessagesDelivered(deliveredMessageIds);
+  },
+
+  loadOlderMessages: async () => {
+    const {
+      selectedUser,
+      nextMessagesCursor,
+      hasMoreMessages,
+      isOlderMessagesLoading,
+    } = get();
+
+    if (
+      !selectedUser ||
+      !nextMessagesCursor ||
+      !hasMoreMessages ||
+      isOlderMessagesLoading
+    ) {
+      return;
+    }
+
+    const userId = selectedUser._id;
+    const { authUser } = useAuthStore.getState();
+    set({ isOlderMessagesLoading: true });
+
+    try {
+      const res = await axiosInstance.get(`/messages/${userId}`, {
+        params: {
+          limit: MESSAGE_PAGE_SIZE,
+          cursor: nextMessagesCursor,
+        },
+      });
+
+      const olderMessages = res.data.messages.map((message) =>
+        message.senderId === authUser?._id
+          ? { ...message, status: "sent" }
+          : message
+      );
+
+      set((state) => {
+        if (state.selectedUser?._id !== userId) return {};
+
+        return {
+          messages: mergeMessages(state.messages, olderMessages),
+          nextMessagesCursor: res.data.nextCursor,
+          hasMoreMessages: res.data.hasMore,
+        };
+      });
+
+      const deliveredMessageIds = olderMessages
+        .filter(
+          (message) =>
+            message.receiverId === authUser?._id && !message.deliveredAt
+        )
+        .map((message) => message._id);
+
+      get().markMessagesDelivered(deliveredMessageIds);
+    } catch (error) {
+      toast.error(
+        error.response?.data?.message || "Failed to load older messages"
+      );
+    } finally {
+      set((state) =>
+        state.selectedUser?._id === userId
+          ? { isOlderMessagesLoading: false }
+          : {}
+      );
+    }
   },
 
   sendMessage: async (messageData, receiverIdOverride) => {

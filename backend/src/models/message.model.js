@@ -38,6 +38,12 @@ messageSchema.index(
   { senderId: 1, clientMessageId: 1 },
   { unique: true }
 );
+messageSchema.index({
+  senderId: 1,
+  receiverId: 1,
+  createdAt: -1,
+  _id: -1,
+});
 
 const Message = mongoose.model("Message", messageSchema);
 
