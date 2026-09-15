@@ -12,6 +12,8 @@ import { app, server, initializeRealtime, closeRealtime } from "./lib/socket.js"
 import { config, validateEnvironment } from "./lib/config.js";
 import { connectRedis, closeRedis, redisIsReady } from "./lib/redis.js";
 import { apiLimiter } from "./lib/rateLimit.js";
+import User from "./models/user.model.js";
+import Message from "./models/message.model.js";
 
 app.set("trust proxy", config.trustProxy);
 app.use((req, res, next) => {
@@ -79,6 +81,8 @@ process.on("SIGINT", () => { void shutdown(); });
 try {
   validateEnvironment();
   await Promise.all([connectDB(), connectRedis()]);
+  // Cross-node idempotency depends on the unique sender/clientMessageId index.
+  await Promise.all([User.init(), Message.init()]);
   await initializeRealtime();
   await new Promise((resolve, reject) => {
     server.once("error", reject);

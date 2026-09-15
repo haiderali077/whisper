@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { positiveInteger, validateEnvironment } from "../src/lib/config.js";
 import { presenceMember, createPresenceManager } from "../src/lib/presence.js";
 import { consumeRateLimit, httpRateLimit, allowReceipt } from "../src/lib/rateLimit.js";
@@ -20,6 +22,17 @@ test("configuration does not accept invalid intervals", () => {
   process.env.MILESTONE_UNIT_INTERVAL = "0";
   assert.throws(() => positiveInteger("MILESTONE_UNIT_INTERVAL", 10), /positive integer/);
   delete process.env.MILESTONE_UNIT_INTERVAL;
+});
+
+test("the backend exits rather than listening without Redis configuration", () => {
+  const result = spawnSync(process.execPath, ["src/index.js"], {
+    cwd: fileURLToPath(new URL("../", import.meta.url)),
+    env: { ...process.env, PORT: "5001", NODE_ENV: "development", MONGODB_URI: "mongodb://127.0.0.1:1/unit", JWT_SECRET: "unit-test-only", REDIS_URL: "" },
+    encoding: "utf8", timeout: 5000,
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /startup failed/);
+  assert.ok(!result.stdout.includes("Listening"));
 });
 
 test("presence identifies individual connections, not just a user", () => {
