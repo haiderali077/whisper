@@ -528,7 +528,7 @@ These tests do not prove a cloud region can fail over, a browser transparently r
 
 The test infrastructure uses real Redis, MongoDB, two backend services, and NGINX. Unit tests cover isolated logic; integration tests prove process boundaries and saved database state.
 
-Verification results are recorded in the final section after the complete stack is run. The integration suite currently has 19 named behavior checks plus its outer test, which Node reports as 20 tests. That is not a concurrent-user capacity measurement.
+Verification results are recorded in the final section. The integration suite has 19 named behavior checks plus its outer test, which Node reports as 20 tests. That is not a concurrent-user capacity measurement.
 
 ### Integration checks
 
@@ -926,4 +926,25 @@ Use these to verify library behavior; project-specific implementation details ab
 
 ## Verification record
 
-Final verification results are added after the completed branch is tested. Do not treat an earlier draft commit as the finished milestone.
+Verified locally on **2026-09-15**, using implementation commit `34f4f6d` on `feat/distributed-backend`.
+
+| Check | Result |
+| --- | --- |
+| Host-side unit suite | 8 passed; 0 failed |
+| Clean committed-source Docker build | Backend and integration-test images built successfully |
+| Frontend build using committed lockfile | Passed with Vite 6.3.5; frontend served through NGINX |
+| Complete local topology | Redis, MongoDB, Backend 1, Backend 2, and NGINX all healthy |
+| Clean-source integration suite | 20 passed; 0 failed; 0 skipped (19 behavior checks plus outer test) |
+| Unit suite inside clean-source test image | 8 passed; 0 failed |
+| Lint of changed frontend files | Passed |
+| Full frontend lint | Pre-existing failure: unused `useNavigate` import in `src/pages/SignUpPage.jsx` |
+| Dependency installation | Successful; committed frontend lockfile reported 23 audit advisories (2 low, 4 moderate, 15 high, 2 critical) |
+| Whitespace check | `git diff --check` passed |
+
+For the final reproducibility check, the Docker build context was generated with `git archive HEAD`, not the dirty working directory. This intentionally excluded unrelated local changes to the root package, `.gitignore`, and frontend lockfile. Both runtime images and the test image were rebuilt from that committed source before rerunning verification.
+
+The final integration run took approximately 14.4 seconds. That is suite execution time, including intentional heartbeat/expiry waits—not an end-to-end latency benchmark or capacity figure.
+
+The unrelated frontend lint issue and audit advisories were not changed as part of Milestone 2. The existing uncommitted frontend lockfile contains separate dependency updates, but those were deliberately not included in this milestone's commits. Review dependency security before any production rollout; passing architecture tests does not mean the entire application is security-audited.
+
+Test-owned database records and explicit Redis test keys were cleaned up. No deployed application, production database, or `main` branch was changed. The local Docker stack remains available at `http://localhost:8080`; use `docker compose stop` when finished.
