@@ -5,26 +5,43 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { parse } from "cookie";
 import { Server } from "socket.io";
+import { createAdapter } from "@socket.io/redis-adapter";
 
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
+import { config } from "./config.js";
+import { redis, redisPublisher, redisSubscriber, redisIsReady } from "./redis.js";
+import { createPresenceManager, presenceMember } from "./presence.js";
+import { allowReceipt, consumeRateLimit } from "./rateLimit.js";
 
 const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173"],
+    origin: config.corsOrigins,
     credentials: true,
   },
 });
 
-const connectedSocketsByUser = new Map();
-
 export const getUserRoom = (userId) => `user:${userId.toString()}`;
 
-const emitOnlineUsers = () => {
-  io.emit("getOnlineUsers", [...connectedSocketsByUser.keys()]);
+const presence = createPresenceManager({
+  client: redis, prefix: config.redisPrefix, leaseMs: config.leaseMs,
+  heartbeatMs: config.heartbeatMs, io, isReady: redisIsReady,
+});
+
+export const initializeRealtime = async () => {
+  io.adapter(createAdapter(redisPublisher, redisSubscriber, {
+    key: `${config.redisPrefix}:socket.io`,
+    publishOnSpecificResponseChannel: true,
+  }));
+  await presence.start();
+};
+
+export const closeRealtime = async () => {
+  await new Promise((resolve) => io.close(resolve));
+  await presence.stop();
 };
 
 const getValidMessageIds = (messageIds) => {
@@ -43,6 +60,19 @@ const createReceipt = (message) => ({
 
 io.use(async (socket, next) => {
   try {
+    if (!redisIsReady() || mongoose.connection.readyState !== 1) {
+      return next(new Error("Service temporarily unavailable"));
+    }
+    const forwarded = socket.handshake.headers["x-forwarded-for"];
+    const address = config.trustProxy && typeof forwarded === "string"
+      ? forwarded.split(",").at(-config.trustProxy)?.trim() || socket.handshake.address
+      : socket.handshake.address;
+    const limit = await consumeRateLimit(redis, config.redisPrefix, "handshakes", address, config.handshakeLimit, 60000);
+    if (!limit.allowed) {
+      const error = new Error("Too many connection attempts");
+      error.data = { code: "RATE_LIMITED", retryAfter: limit.retryAfter };
+      return next(error);
+    }
     const cookies = parse(socket.handshake.headers.cookie || "");
     const token = cookies.jwt;
 
@@ -67,17 +97,15 @@ io.use(async (socket, next) => {
 io.on("connection", (socket) => {
   const userId = socket.data.userId;
   const userRoom = getUserRoom(userId);
-  const userSockets = connectedSocketsByUser.get(userId) || new Set();
-
-  userSockets.add(socket.id);
-  connectedSocketsByUser.set(userId, userSockets);
   socket.join(userRoom);
-  emitOnlineUsers();
+  socket.emit("serverInfo", { instanceId: config.instanceId });
+  void presence.update();
 
   socket.on("messagesDelivered", async (payload = {}, acknowledge) => {
     const respond =
       typeof acknowledge === "function" ? acknowledge : () => {};
-    const messageIds = getValidMessageIds(payload.messageIds);
+    if (!await allowReceipt(userId, acknowledge)) return;
+    const messageIds = getValidMessageIds(payload?.messageIds);
 
     if (messageIds.length === 0) {
       return respond({ ok: false, error: "Valid message IDs are required" });
@@ -97,7 +125,7 @@ io.on("connection", (socket) => {
         );
 
         await Message.updateMany(
-          { _id: { $in: undeliveredIds }, receiverId: userId },
+          { _id: { $in: undeliveredIds }, receiverId: userId, deliveredAt: null },
           { $set: { deliveredAt } }
         );
       }
@@ -134,7 +162,8 @@ io.on("connection", (socket) => {
   socket.on("messagesRead", async (payload = {}, acknowledge) => {
     const respond =
       typeof acknowledge === "function" ? acknowledge : () => {};
-    const messageIds = getValidMessageIds(payload.messageIds);
+    if (!await allowReceipt(userId, acknowledge)) return;
+    const messageIds = getValidMessageIds(payload?.messageIds);
 
     if (messageIds.length === 0) {
       return respond({ ok: false, error: "Valid message IDs are required" });
@@ -196,14 +225,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    const currentUserSockets = connectedSocketsByUser.get(userId);
-    currentUserSockets?.delete(socket.id);
-
-    if (!currentUserSockets || currentUserSockets.size === 0) {
-      connectedSocketsByUser.delete(userId);
-    }
-
-    emitOnlineUsers();
+    void presence.update([presenceMember(userId, socket.id)]);
   });
 });
 

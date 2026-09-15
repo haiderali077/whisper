@@ -172,6 +172,10 @@ export const sendMessage = async (req, res) => {
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
 
+    if (!mongoose.isValidObjectId(receiverId)) {
+      return res.status(400).json({ message: "Invalid receiver ID" });
+    }
+
     if (typeof clientMessageId !== "string" || !clientMessageId.trim()) {
       return res.status(400).json({
         message: "clientMessageId is required",
