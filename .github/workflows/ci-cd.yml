@@ -1,0 +1,146 @@
+name: CI and container delivery
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, 'feat/**', 'fix/**']
+  workflow_dispatch:
+
+# Test jobs do not need repository/package write access.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  quality:
+    name: Lint, unit tests and frontend build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+      - name: Frontend lint
+        run: npm run lint --prefix frontend
+      - name: Backend and harness syntax
+        run: |
+          find backend/src backend/load backend/test -type f -name '*.js' -print0 | xargs -0 -n 1 node --check
+      - name: Backend and harness unit tests
+        run: npm test --prefix backend
+      - name: Frontend production build
+        run: npm run build --prefix frontend
+
+  distributed:
+    name: Distributed integration and messaging smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Explicitly a disposable test secret, not a production credential.
+      JWT_SECRET: ci-only-whisper-fixture-secret-not-for-production
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check Docker tooling and Compose configuration
+        run: |
+          docker version
+          docker compose version
+          docker compose -p whisper-ci -f compose.yaml -f compose.ci.yaml --profile test config --quiet
+          docker compose -p whisper-load -f compose.load.yaml --profile load config --quiet
+      - name: Build distributed test stack
+        run: docker compose -p whisper-ci -f compose.yaml -f compose.ci.yaml --profile test build
+      - name: Wait for healthy distributed services
+        run: docker compose -p whisper-ci -f compose.yaml -f compose.ci.yaml up -d --wait --wait-timeout 180 mongo redis backend1 backend2 load-balancer
+      - name: Real Redis, MongoDB, two-node and NGINX integration tests
+        run: docker compose -p whisper-ci -f compose.yaml -f compose.ci.yaml --profile test run --rm --no-deps integration-tests
+      - name: Stop integration resources before smoke
+        run: docker compose -p whisper-ci -f compose.yaml -f compose.ci.yaml down --volumes --remove-orphans
+      - name: Build isolated messaging smoke stack
+        run: docker compose -p whisper-load -f compose.load.yaml --profile load build
+      - name: Wait for healthy messaging smoke services
+        run: docker compose -p whisper-load -f compose.load.yaml up -d --wait --wait-timeout 180 mongo redis backend1 backend2 load-balancer
+      - name: Cross-instance messaging lifecycle smoke
+        env:
+          LOAD_PAIRS: '2'
+          LOAD_RATES: '2'
+          LOAD_DURATION_SECONDS: '5'
+          LOAD_WARMUP_SECONDS: '1'
+          LOAD_SOURCE_REVISION: ${{ github.sha }}
+          LOAD_HOST_DESCRIPTION: GitHub-hosted Ubuntu runner; synthetic CI smoke, not a capacity benchmark
+          # Hosted-runner timing varies; correctness is the purpose of this smoke.
+          LOAD_MAX_ERROR_RATE: '0'
+          LOAD_MAX_HTTP_P95_MS: '5000'
+          LOAD_MAX_READ_P95_MS: '5000'
+          LOAD_MAX_SCHEDULER_P95_MS: '1000'
+        run: |
+          # docs/ is ignored and absent from checkout. The runner is non-root;
+          # pre-create its disposable report mount with writable permissions.
+          install -d -m 0777 docs/performance/results
+          docker compose -p whisper-load -f compose.load.yaml --profile load run --rm load-tests
+      - name: Service diagnostics on failure
+        if: failure()
+        run: |
+          docker compose -p whisper-ci -f compose.yaml -f compose.ci.yaml ps -a
+          docker compose -p whisper-ci -f compose.yaml -f compose.ci.yaml logs --no-color --tail 150
+          docker compose -p whisper-load -f compose.load.yaml ps -a
+          docker compose -p whisper-load -f compose.load.yaml logs --no-color --tail 150
+      - name: Clean disposable CI resources
+        if: always()
+        run: |
+          docker compose -p whisper-ci -f compose.yaml -f compose.ci.yaml down --volumes --remove-orphans
+          docker compose -p whisper-load -f compose.load.yaml down --volumes --remove-orphans
+
+  deliver:
+    name: Publish versioned application image
+    needs: [quality, distributed]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out verified source revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build and publish release image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_REVISION: ${{ github.sha }}
+        run: |
+          image="ghcr.io/${GH_REPOSITORY,,}:sha-${GH_REVISION}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GH_ACTOR" --password-stdin
+          docker build --target backend \
+            --label "org.opencontainers.image.source=https://github.com/${GH_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GH_REVISION}" \
+            --tag "$image" .
+          docker push "$image"
+          printf '### Container delivered\n\n`%s`\n\nPublication is not production deployment.\n' "$image" >> "$GITHUB_STEP_SUMMARY"
+      - name: Log out of registry
+        if: always()
+        run: docker logout ghcr.io

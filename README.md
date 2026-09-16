@@ -71,6 +71,25 @@ under `docs/`. Successful-message percentiles must be read alongside failures,
 dropped arrivals, and generator lag; these short local runs are not a maximum
 capacity or production-user claim.
 
+## CI and container delivery
+
+`.github/workflows/ci-cd.yml` runs on pull requests to `main`, pushes to `main`,
+`feat/**` and `fix/**`, and manual dispatch. It checks frontend lint/build,
+backend syntax/unit tests, the real two-node Redis/MongoDB/NGINX integration
+suite, and a small isolated cross-instance messaging smoke test.
+
+Only a successful **push to `main`** publishes the application Docker image to
+`ghcr.io/<owner>/<repository>:sha-<full-commit-sha>`. Pull requests and manual
+runs never publish. This is continuous delivery of an image, **not automatic
+production deployment**; Render and production Redis/MongoDB are not configured
+by this workflow. GitHub Actions/package permissions must allow publication.
+
+CI uses disposable databases and no production credentials. Its broader smoke
+timing budgets accommodate hosted-runner variability; they are not benchmark
+targets. Private docs and generated reports are not uploaded as CI artifacts.
+To enforce checks before merges, configure a GitHub branch ruleset requiring
+the two test-job checks; adding YAML alone does not protect `main`.
+
 ### 🔐 Login Page
 
 ![Login Page](loginpage.jpg)

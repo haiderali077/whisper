@@ -1,0 +1,20 @@
+# Overlay for the disposable whisper-ci project; never apply to the demo project.
+# !reset requires a modern Docker Compose v2 implementation.
+services:
+  redis:
+    ports: !reset []
+  mongo:
+    ports: !reset []
+  backend1:
+    ports: !reset []
+    restart: "no"
+  backend2:
+    ports: !reset []
+    restart: "no"
+  load-balancer:
+    image: whisper-nginx-ci:local
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.nginx
+    volumes: !reset []
+    ports: !reset []
