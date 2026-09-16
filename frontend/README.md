@@ -1,12 +1,25 @@
-# React + Vite
+# Whisper frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React/Vite client for Whisper, with Zustand state, Socket.IO subscriptions, message retry states and an IndexedDB offline outbox.
 
-Currently, two official plugins are available:
+See the [project README](../README.md) for architecture, Docker setup, tests and current limitations.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Development
 
-## Expanding the ESLint configuration
+With the distributed backend running, execute from the repository root:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```sh
+npm ci --prefix frontend
+VITE_BACKEND_URL=http://localhost:8080 npm run dev --prefix frontend
+```
+
+`VITE_BACKEND_URL` selects the API and socket origin. Without an override, Vite development uses `http://localhost:5001`; production builds use same-origin requests.
+
+## Checks
+
+```sh
+npm run lint --prefix frontend
+npm run build --prefix frontend
+```
+
+Lint and build checks do not replace browser interaction tests; automated UI tests are not currently implemented.
