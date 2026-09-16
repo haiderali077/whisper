@@ -2,8 +2,7 @@ import { create } from "zustand";
 import { axiosInstance } from "../lib/axios";
 import toast from "react-hot-toast";
 import { io } from "socket.io-client";
-
-const BASE_URL = import.meta.env.MODE === "development" ? "http://localhost:5001" : "/";
+import { backendUrl } from "../lib/backendUrl";
 
 export const useAuthStore = create((set, get) => ({
   authUser: null,
@@ -86,12 +85,24 @@ export const useAuthStore = create((set, get) => ({
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;
 
-    const socket = io(BASE_URL, {
+    const socket = io(backendUrl || undefined, {
       autoConnect: false,
       withCredentials: true,
     });
 
-    socket.on("getOnlineUsers", (userIds) => {
+    let presenceEpoch = null;
+    let presenceRevision = 0;
+    socket.on("connect", () => {
+      presenceEpoch = null;
+      presenceRevision = 0;
+    });
+    socket.on("disconnect", () => set({ onlineUsers: [] }));
+    socket.on("getOnlineUsers", (userIds, metadata) => {
+      if (metadata) {
+        if (metadata.epoch === presenceEpoch && metadata.revision <= presenceRevision) return;
+        presenceEpoch = metadata.epoch;
+        presenceRevision = metadata.revision;
+      }
       set({ onlineUsers: userIds });
     });
 

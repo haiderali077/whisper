@@ -6,6 +6,45 @@
 
 🔗 [View Deployed App](https://whisper-73xo.onrender.com)
 
+## Milestone 2: Distributed Backend
+
+The `feat/distributed-backend` branch adds Redis-backed Socket.IO broadcasting,
+shared multi-device presence with expiring leases, distributed rate limiting,
+and a Docker Compose stack with two Node.js backends behind NGINX. This is a
+local, verified development topology; the live demo above has not been updated.
+
+Read the [detailed architecture and interview guide](docs/MILESTONE_2_DISTRIBUTED_BACKEND.md)
+for request flows, data structures, failure behavior, tests, tradeoffs, setup,
+and honest résumé/interview examples.
+
+Start the local stack from the repository root with Docker Desktop running:
+
+```sh
+docker compose up --build -d --wait
+```
+
+Open `http://localhost:8080`. The stack uses its own MongoDB volume and does not
+inherit `backend/.env`. Cloudinary credentials are optional for text chat; set
+them explicitly if you want image uploads. Do not use the example JWT secret or
+unauthenticated local data services in production.
+
+Run verification:
+
+```sh
+npm test --prefix backend
+docker compose build integration-tests
+docker compose run --rm --no-deps integration-tests
+```
+
+The integration runner creates disposable accounts, exchanges messages between
+different nodes, tests receipts/presence/rate limits, injects failures into its
+own backend processes, and cleans up its own records. Run it only against the
+local development stack. Stop local containers without removing chat history:
+
+```sh
+docker compose stop
+```
+
 ---
 
 ### 🔐 Login Page

@@ -1,0 +1,112 @@
+# Local-only stack: isolated MongoDB, private services, HTTP-friendly cookies.
+# Production requires real secrets, TLS, authenticated data services, and HA.
+x-backend-environment: &backend-environment
+  NODE_ENV: development
+  PORT: 5001
+  SERVE_FRONTEND: "true"
+  MONGODB_URI: mongodb://mongo:27017/whisper
+  REDIS_URL: redis://redis:6379
+  REDIS_PREFIX: whisper
+  JWT_SECRET: ${JWT_SECRET:-local-only-whisper-milestone-do-not-use-in-production}
+  TRUST_PROXY: 1
+  CORS_ORIGINS: http://localhost:5173,http://localhost:8080
+  PRESENCE_HEARTBEAT_MS: 1000
+  PRESENCE_LEASE_MS: 6000
+  CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+  CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+  CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+
+x-backend: &backend
+  build:
+    context: .
+    target: backend
+  restart: unless-stopped
+  depends_on:
+    mongo:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 5s
+    timeout: 4s
+    retries: 12
+    start_period: 15s
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mongo:
+    image: mongo:8.0
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend1:
+    <<: *backend
+    environment:
+      <<: *backend-environment
+      INSTANCE_ID: backend-1
+    # Loopback-only diagnostic ports; ordinary users enter through NGINX.
+    ports:
+      - "127.0.0.1:5001:5001"
+
+  backend2:
+    <<: *backend
+    environment:
+      <<: *backend-environment
+      INSTANCE_ID: backend-2
+    ports:
+      - "127.0.0.1:5002:5001"
+
+  load-balancer:
+    image: nginx:1.28-alpine
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      backend1:
+        condition: service_healthy
+      backend2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/ready"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+
+  integration-tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    environment:
+      <<: *backend-environment
+      TEST_BACKEND_A_URL: http://backend1:5001
+      TEST_BACKEND_B_URL: http://backend2:5001
+      TEST_LOAD_BALANCER_URL: http://load-balancer
+      TEST_REDIS_URL: redis://redis:6379
+      TEST_MONGODB_URI: mongodb://mongo:27017/whisper
+      TEST_JWT_SECRET: ${JWT_SECRET:-local-only-whisper-milestone-do-not-use-in-production}
+    depends_on:
+      load-balancer:
+        condition: service_healthy
+
+volumes:
+  mongo-data:
