@@ -25,5 +25,6 @@ dist-ssr
 
 .env
 
-# Local interview preparation notes
-docs/INTERVIEW_REPORT.md
+# Private interview guides, implementation explanations, and benchmark reports.
+# Public project setup stays in README.md. Keep all detailed notes under docs/.
+/docs/

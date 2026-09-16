@@ -1,0 +1,112 @@
+# Dedicated benchmark project. No host ports or production/demo data services.
+# Always use: docker compose -p whisper-load -f compose.load.yaml ...
+x-load-environment: &load-environment
+  NODE_ENV: development
+  SERVE_FRONTEND: "false"
+  PORT: 5001
+  MONGODB_URI: mongodb://mongo:27017/whisper_load
+  REDIS_URL: redis://redis:6379
+  REDIS_PREFIX: whisper_load
+  JWT_SECRET: local-only-whisper-load-test-secret-not-for-production
+  TRUST_PROXY: 1
+  CORS_ORIGINS: http://load-balancer
+  PRESENCE_HEARTBEAT_MS: 1000
+  PRESENCE_LEASE_MS: 6000
+  # High but finite benchmark quotas; middleware still executes on every event.
+  # This measures messaging performance, not the default abuse-prevention budget.
+  RATE_LIMIT_API: 200000
+  RATE_LIMIT_AUTH: 10000
+  RATE_LIMIT_SEND: 100000
+  RATE_LIMIT_RECEIPTS: 200000
+  RATE_LIMIT_HANDSHAKES: 10000
+  RATE_LIMIT_UPLOAD: 10
+
+x-load-backend: &load-backend
+  build:
+    context: .
+    target: backend
+  depends_on:
+    mongo:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 3s
+    timeout: 4s
+    retries: 20
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  mongo:
+    image: mongo:8.0
+    volumes:
+      - load-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  backend1:
+    <<: *load-backend
+    environment:
+      <<: *load-environment
+      INSTANCE_ID: backend-1
+  backend2:
+    <<: *load-backend
+    environment:
+      <<: *load-environment
+      INSTANCE_ID: backend-2
+  load-balancer:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.nginx
+    depends_on:
+      backend1:
+        condition: service_healthy
+      backend2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  load-tests:
+    profiles: ["load"]
+    build:
+      context: .
+      target: test
+    environment:
+      <<: *load-environment
+      LOAD_LOCAL_ONLY: "true"
+      LOAD_BASE_URL: http://load-balancer
+      LOAD_PAIRS: ${LOAD_PAIRS:-25}
+      LOAD_DURATION_SECONDS: ${LOAD_DURATION_SECONDS:-30}
+      LOAD_WARMUP_SECONDS: ${LOAD_WARMUP_SECONDS:-5}
+      LOAD_RATES: ${LOAD_RATES:-10,50,100}
+      LOAD_RUN_LABEL: ${LOAD_RUN_LABEL:-}
+      LOAD_SOURCE_REVISION: ${LOAD_SOURCE_REVISION:-uncommitted-working-tree}
+      LOAD_HOST_DESCRIPTION: ${LOAD_HOST_DESCRIPTION:-not-specified}
+      LOAD_MESSAGE_TIMEOUT_MS: ${LOAD_MESSAGE_TIMEOUT_MS:-10000}
+      LOAD_MAX_IN_FLIGHT: ${LOAD_MAX_IN_FLIGHT:-1000}
+      LOAD_MAX_ERROR_RATE: ${LOAD_MAX_ERROR_RATE:-0.01}
+      LOAD_MAX_HTTP_P95_MS: ${LOAD_MAX_HTTP_P95_MS:-500}
+      LOAD_MAX_READ_P95_MS: ${LOAD_MAX_READ_P95_MS:-1000}
+      LOAD_MAX_SCHEDULER_P95_MS: ${LOAD_MAX_SCHEDULER_P95_MS:-20}
+      LOAD_RESULTS_DIR: /results
+    volumes:
+      - ./docs/performance/results:/results
+    depends_on:
+      load-balancer:
+        condition: service_healthy
+    command: ["npm", "run", "load"]
+
+volumes:
+  load-mongo-data:
