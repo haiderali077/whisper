@@ -945,6 +945,19 @@ For the final reproducibility check, the Docker build context was generated with
 
 The final integration run took approximately 14.4 seconds. That is suite execution time, including intentional heartbeat/expiry waits—not an end-to-end latency benchmark or capacity figure.
 
-The unrelated frontend lint issue and audit advisories were not changed as part of Milestone 2. The existing uncommitted frontend lockfile contains separate dependency updates, but those were deliberately not included in this milestone's commits. Review dependency security before any production rollout; passing architecture tests does not mean the entire application is security-audited.
+At the time of that original verification, the unrelated frontend lint issue and audit advisories were not changed as part of Milestone 2. The then-uncommitted frontend lockfile contained separate dependency updates, deliberately excluded from the original milestone commits. See the follow-up verification below for the subsequent dependency update. Passing architecture tests does not mean the entire application is security-audited.
 
-Test-owned database records and explicit Redis test keys were cleaned up. No deployed application, production database, or `main` branch was changed. The local Docker stack remains available at `http://localhost:8080`; use `docker compose stop` when finished.
+Test-owned database records and explicit Redis test keys were cleaned up. During that original verification, no deployed application, production database, or `main` branch was changed. The local Docker stack remains available at `http://localhost:8080`; use `docker compose stop` when finished.
+
+### Follow-up pre-merge verification — 2026-09-15
+
+At the user's subsequent request to push the remaining changes and merge into `main`, the previously excluded edits to `.gitignore`, the root `package.json`, and `frontend/package-lock.json` are included in the follow-up update.
+
+- A fresh `npm ci --prefix frontend --no-audit` succeeded.
+- The frontend built successfully with the updated lockfile and Vite 6.4.3.
+- `npm audit --prefix frontend` reported **0 vulnerabilities** at verification time. This is an advisory check, not a comprehensive security audit.
+- The host-side unit suite passed all **8 tests**.
+- The distributed integration suite passed **20 tests**, with no failures or skipped tests. This rerun used the existing backend/test images, whose backend and test source were unchanged; it was not a rebuild of the runtime frontend with the updated lockfile.
+- Full frontend lint still reports the existing unused `useNavigate` import in `frontend/src/pages/SignUpPage.jsx`.
+
+The root package edit removes its `build` script. Docker builds the frontend directly and remains independent of that script, but an external deployment configured to run root-level `npm run build` must update its build command before deploying this revision. No cloud deployment configuration or production database was modified by these checks.

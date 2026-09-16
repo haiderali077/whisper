@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 .env
+
+# Local interview preparation notes
+docs/INTERVIEW_REPORT.md
