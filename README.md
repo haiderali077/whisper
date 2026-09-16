@@ -13,9 +13,8 @@ shared multi-device presence with expiring leases, distributed rate limiting,
 and a Docker Compose stack with two Node.js backends behind NGINX. This is a
 local, verified development topology; the live demo above has not been updated.
 
-Read the [detailed architecture and interview guide](docs/MILESTONE_2_DISTRIBUTED_BACKEND.md)
-for request flows, data structures, failure behavior, tests, tradeoffs, setup,
-and honest résumé/interview examples.
+Detailed implementation and interview notes are kept locally under `docs/`,
+which is excluded from Git. Public setup and verification commands are below.
 
 Start the local stack from the repository root with Docker Desktop running:
 
@@ -46,6 +45,31 @@ docker compose stop
 ```
 
 ---
+
+## Messaging load tests
+
+A separate, local-only benchmark measures two-backend text messaging and
+delivered/read receipts through NGINX, recording throughput, latency percentiles,
+errors, and generator health. It uses its own Redis/MongoDB services and higher
+finite test quotas; it does not touch the demo database or establish production
+capacity.
+
+Run the isolated benchmark from the repository root:
+
+```sh
+docker compose -p whisper-load -f compose.load.yaml --profile load build
+docker compose -p whisper-load -f compose.load.yaml up -d --wait mongo redis backend1 backend2 load-balancer
+docker compose -p whisper-load -f compose.load.yaml --profile load run --rm load-tests
+docker compose -p whisper-load -f compose.load.yaml stop
+```
+
+Defaults: 25 cross-instance pairs (50 authenticated sockets), a 5-second warmup,
+then 30 seconds each at 10, 50, and 100 messages/second. No benchmark service
+publishes a host port. JSON/Markdown results are saved locally under ignored
+`docs/performance/results/`; private methodology and interview guides are also
+under `docs/`. Successful-message percentiles must be read alongside failures,
+dropped arrivals, and generator lag; these short local runs are not a maximum
+capacity or production-user claim.
 
 ### 🔐 Login Page
 

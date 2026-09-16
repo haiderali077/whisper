@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "test": "node --test test/unit.test.js",
-    "test:integration": "node --test --test-concurrency=1 test/distributed.integration.test.js"
+    "test": "node --test test/unit.test.js test/load.test.js",
+    "test:integration": "node --test --test-concurrency=1 test/distributed.integration.test.js",
+    "load": "node load/run.js"
   },
   "keywords": [],
   "author": "",

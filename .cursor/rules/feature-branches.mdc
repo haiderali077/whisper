@@ -1,0 +1,11 @@
+---
+description: Start every new feature on its own Git branch
+alwaysApply: true
+---
+
+# Feature branches
+
+- Create a descriptive feature branch before implementing any new feature, even if the user does not mention branching.
+- Inspect and preserve existing work; prefer an up-to-date main as the base when appropriate.
+- Keep follow-up work for an existing feature on that feature's branch.
+- Do not commit, push, or merge unless the user requests it.
